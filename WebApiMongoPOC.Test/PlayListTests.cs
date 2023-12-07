@@ -1,6 +1,7 @@
 using AutoFixture;
 using FluentAssertions;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Moq;
 using WebApiMongoPOC.Controllers;
 using WebApiMongoPOC.Models;
@@ -20,30 +21,28 @@ namespace WebApiMongoPOC.Test
             _fixture = new Fixture();
             _mockMongoDBService = new Mock<IMongoDBService>();
             _fixture.Register(() => _mockMongoDBService.Object);
-            _playLists = _fixture.CreateMany<PlayList>(3).ToList();
-            _mockMongoDBService.Setup(m => m.GetPlayListsAsync()).ReturnsAsync(_playLists);
-            _mockMongoDBService.Setup(m => m.CreatePlayListAsync(It.IsAny<PlayList>()));
-            _mockMongoDBService.Setup(m => m.UpdatePlayListAsync(It.IsAny<PlayList>()));
-            _mockMongoDBService.Setup(m => m.DeleteAsync(It.IsAny<string>()));
+            _playLists = _fixture.CreateMany<PlayList>().ToList();
             _controller = new PlayListController(_mockMongoDBService.Object);
         }
 
         [Fact]
         public async void Get_PlayLists_ReturnsPlayLists()
         {
+            _mockMongoDBService.Setup(m => m.GetPlayListsAsync()).ReturnsAsync(_playLists);
+
             var result = await _controller.Get();
 
             var objectResult = result.Should().BeOfType<OkObjectResult>().Subject;
-            objectResult.StatusCode.Should().Be(200);
             var actualValue = objectResult.Value.Should().BeOfType<List<PlayList>>().Subject;
             actualValue.Should().NotBeNull();
-            actualValue.Should().HaveCount(3);
+            actualValue.Should().Equal(_playLists);
         }
 
         [Fact]
         public async void Add_PlayList_ReturnsCreated()
         {
             PlayList playList = _fixture.Create<PlayList>();
+            _mockMongoDBService.Setup(m => m.CreatePlayListAsync(playList)).Returns(Task.CompletedTask);
 
             var result = await _controller.Post(playList);
 
@@ -55,6 +54,7 @@ namespace WebApiMongoPOC.Test
         {
             var playList = _playLists.FirstOrDefault();
             playList.name = "Drama";
+            _mockMongoDBService.Setup(m => m.UpdatePlayListAsync(playList)).Returns(Task.CompletedTask);
 
             var result = await _controller.Update(playList);
 
@@ -65,7 +65,8 @@ namespace WebApiMongoPOC.Test
         public async void Delete_PlayList_ReturnsNoContent()
         {
             var playListID = _playLists.FirstOrDefault().Id;
-            
+            _mockMongoDBService.Setup(m => m.DeleteAsync(playListID)).Returns(Task.CompletedTask);
+
             var result = await _controller.Delete(playListID);
 
             result.Should().BeOfType<NoContentResult>();
@@ -80,7 +81,8 @@ namespace WebApiMongoPOC.Test
 
             var result = await _controller.Post(playList);
 
-            result.Should().BeOfType<BadRequestObjectResult>();
+            var actualValue = result.Should().BeOfType<BadRequestObjectResult>().Subject;
+            ((ModelStateDictionary.ValueEnumerable)actualValue.Value).AsEnumerable().ToList()[0].Errors[0].ErrorMessage.Should().Be("The field name must be a string or array type with a minimum length of '3'.");
         }
 
         [Fact]
@@ -92,14 +94,15 @@ namespace WebApiMongoPOC.Test
 
             var result = await _controller.Post(playList);
 
-            result.Should().BeOfType<BadRequestObjectResult>();
+            var actualValue = result.Should().BeOfType<BadRequestObjectResult>().Subject;
+            ((ModelStateDictionary.ValueEnumerable)actualValue.Value).AsEnumerable().ToList()[0].Errors[0].ErrorMessage.Should().Be("The field movies must be a string or array type with a minimum length of '1'.");
         }
 
         [Fact]
         public async void Update_InvalidPlaylist_ReturnsNotFound()
         {
-            _mockMongoDBService.Setup(m => m.UpdatePlayListAsync(It.IsAny<PlayList>())).Throws(new KeyNotFoundException());
             var playList = _fixture.Create<PlayList>();
+            _mockMongoDBService.Setup(m => m.UpdatePlayListAsync(playList)).Throws(new KeyNotFoundException());
 
             var result = await _controller.Update(playList);
 
@@ -109,8 +112,8 @@ namespace WebApiMongoPOC.Test
         [Fact]
         public async void Delete_InvalidPlaylist_ReturnsNotFound()
         {
-            _mockMongoDBService.Setup(m => m.DeleteAsync(It.IsAny<string>())).Throws(new KeyNotFoundException());
-            var playListID = _playLists.FirstOrDefault().Id;
+            var playListID = new Guid().ToString();
+            _mockMongoDBService.Setup(m => m.DeleteAsync(playListID)).Throws(new KeyNotFoundException());
 
             var result = await _controller.Delete(playListID);
 
